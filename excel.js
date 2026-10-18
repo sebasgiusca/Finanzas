@@ -89,7 +89,7 @@
     const wb = new ExcelJS.Workbook();
     wb.creator = "Mis Finanzas"; wb.created = new Date();
     const meses = [...new Set(filas.map(f => f.mes))].sort();
-    hojaResumen(wb, "Resumen", "Mis Finanzas · Resumen (todos)", filas, meses);
+    hojaResumen(wb, "Resumen", "Mis Finanzas · Resumen (juntos)", filas, meses);
     for (const p of personas) {
       const fp = filas.filter(f => f.persona === p);
       if (fp.length) hojaResumen(wb, p, "Resumen de " + p, fp, meses);

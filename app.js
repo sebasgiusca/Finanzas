@@ -20,7 +20,7 @@ function guardar() {
   catch (e) { alert("No se ha podido guardar: el móvil no tiene espacio para la app. Haz una copia de seguridad en Más."); }
 }
 
-let UI = { vista: "resumen", mes: null, filtroP: "Todos", filtroCat: null, soloRevisar: false, q: "" };
+let UI = { vista: "resumen", mes: null, filtroP: "Juntos", filtroCat: null, soloRevisar: false, q: "" };
 UI.mes = ultimoMes() || mesDe(new Date());
 
 // ====== Utilidades ======
@@ -31,6 +31,7 @@ const eur0 = v => (v || 0).toLocaleString("es-ES", { style: "currency", currency
 function mesDe(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0"); }
 function sumaMes(m, n) { let [y, mm] = m.split("-").map(Number); mm += n; while (mm > 12) { mm -= 12; y++; } while (mm < 1) { mm += 12; y--; } return y + "-" + String(mm).padStart(2, "0"); }
 function nombreMes(m) { const [y, mm] = m.split("-").map(Number); return FinCore.MESES[mm - 1] + " " + y; }
+function nombreImp(m) { const [a, b] = m.split("/"); return b ? nombreMes(a) + " a " + nombreMes(b) : nombreMes(a); }
 function ultimoMes() { return S.movs.reduce((a, m) => (m.mes > a ? m.mes : a), "") || null; }
 function fechaLarga(f) { const d = new Date(f + "T12:00:00"); const t = d.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" }); return t.charAt(0).toUpperCase() + t.slice(1); }
 function toast(t) { const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("on"), 2600); }
@@ -67,7 +68,7 @@ function tipoDe(cat, imp) {
 
 // ====== Calculos ======
 function movsDe(mes, persona) {
-  return S.movs.filter(m => m.mes === mes && (persona === "Todos" || m.persona === persona));
+  return S.movs.filter(m => m.mes === mes && (persona === "Juntos" || m.persona === persona));
 }
 function resumen(lista) {
   const r = { ing: 0, gas: 0, aho: 0, fijo: 0, vari: 0, cats: {}, ingCats: {}, revisar: 0 };
@@ -81,10 +82,18 @@ function resumen(lista) {
   return r;
 }
 
+// Juntos = todo (Sebas + Marta + Común). "Común" solo sale como filtro si hay algo marcado como Común
+function filtrosP() { return ["Juntos", "Sebas", "Marta", ...(S.movs.some(m => m.persona === "Común") ? ["Común"] : [])]; }
+function ahorroAnio(mes, persona) {
+  let t = 0; const y = mes.slice(0, 4);
+  for (let m = y + "-01"; m <= mes; m = sumaMes(m, 1)) { const r = resumen(movsDe(m, persona)); t += r.ing - r.gas; }
+  return t;
+}
+
 // ====== Pintar ======
 function pintar() {
   $("#mesLbl").textContent = UI.vista === "anio" ? "Año " + UI.mes.slice(0, 4) : nombreMes(UI.mes);
-  $("#personas").innerHTML = ["Todos", ...PERSONAS].map(p => `<button class="chip ${UI.filtroP === p ? "on" : ""}" data-p="${p}">${p}</button>`).join("");
+  $("#personas").innerHTML = filtrosP().map(p => `<button class="chip ${UI.filtroP === p ? "on" : ""}" data-p="${p}">${p}</button>`).join("");
   $("#personas").style.display = UI.vista === "mas" ? "none" : "";
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.v === UI.vista));
   const v = $("#vista");
@@ -101,13 +110,16 @@ function vResumen() {
   if (!lista.length) return `<div class="vacio"><b>Sin movimientos en ${nombreMes(UI.mes)}</b>Cambia de mes con las flechas o sube el extracto de este mes.</div>`;
   const r = resumen(lista), ant = resumen(movsDe(sumaMes(UI.mes, -1), UI.filtroP));
   const bal = r.ing - r.gas - r.aho;
+  const jun = UI.filtroP === "Juntos", ahMes = r.ing - r.gas, ahAnio = ahorroAnio(UI.mes, UI.filtroP);
   let h = "";
   if (r.revisar) h += `<button class="aviso" data-act="revisar">${r.revisar} movimiento${r.revisar > 1 ? "s" : ""} por revisar ›</button>`;
   h += `<div class="cards">
     <div class="card"><div class="lbl">Ha entrado</div><div class="big pos">${eur(r.ing)}</div></div>
-    <div class="card"><div class="lbl">Has gastado</div><div class="big neg">${eur(r.gas)}</div></div>
-    <div class="card ancha"><div class="lbl">Te queda este mes${r.aho ? " (después de ahorrar " + eur(r.aho) + ")" : ""}</div><div class="big ${bal >= 0 ? "pos" : "neg"}">${eur(bal)}</div>
-      ${ant.gas ? `<div class="lbl" style="margin-top:4px">Mes anterior gastaste ${eur(ant.gas)} (${difTxt(r.gas, ant.gas)})</div>` : ""}</div>
+    <div class="card"><div class="lbl">${jun ? "Habéis gastado" : "Has gastado"}</div><div class="big neg">${eur(r.gas)}</div></div>
+    ${jun ? `<div class="card ancha"><div class="lbl">Ahorráis juntos este mes${r.aho ? " (" + eur(r.aho) + " ya apartado en ahorro)" : ""}</div><div class="big ${ahMes >= 0 ? "pos" : "neg"}">${eur(ahMes)}</div>
+      ${ant.gas ? `<div class="lbl" style="margin-top:4px">Mes anterior gastasteis ${eur(ant.gas)} (${difTxt(r.gas, ant.gas)})</div>` : ""}<div class="lbl" style="margin-top:4px">En ${UI.mes.slice(0, 4)} lleváis ahorrado <b class="${ahAnio >= 0 ? "pos" : "neg"}">${eur(ahAnio)}</b></div></div>` : ""}
+    <div class="card ancha" ${jun && !r.aho ? 'style="display:none"' : ""}><div class="lbl">${jun ? "Os queda en cuenta este mes" : "Te queda este mes"}${r.aho ? " (después de ahorrar " + eur(r.aho) + ")" : ""}</div><div class="big ${bal >= 0 ? "pos" : "neg"}">${eur(bal)}</div>
+      ${ant.gas ? `<div class="lbl" style="margin-top:4px">Mes anterior ${jun ? "gastasteis" : "gastaste"} ${eur(ant.gas)} (${difTxt(r.gas, ant.gas)})</div>` : ""}</div>
     <div class="card ancha"><div class="lbl">Fijos ${eur(r.fijo)} · Variables ${eur(r.vari)}</div>
       <div class="barra"><i style="width:${r.gas ? (r.fijo / r.gas * 100) : 0}%;background:#a78bfa"></i><i style="width:${r.gas ? (r.vari / r.gas * 100) : 0}%;background:var(--ac)"></i></div>
       <div class="lbl" style="margin-top:6px"><span style="color:#a78bfa">■</span> Fijos (hipoteca, recibos...) <span style="color:var(--ac);margin-left:8px">■</span> Variables</div></div>
@@ -179,7 +191,7 @@ function repetidos(y) {
   const g = {};
   for (const m of S.movs) {
     if (!m.mes.startsWith(y) || m.importe >= 0) continue;
-    if (UI.filtroP !== "Todos" && m.persona !== UI.filtroP) continue;
+    if (UI.filtroP !== "Juntos" && m.persona !== UI.filtroP) continue;
     if (/^transferencia/i.test(m.concepto)) continue;
     const k = FinCore.claveComercio(m.concepto) + "|" + m.importe.toFixed(2);
     (g[k] ||= { nombre: FinCore.limpiar(m.concepto), imp: -m.importe, cat: catDe(m), meses: new Set() }).meses.add(m.mes);
@@ -190,7 +202,7 @@ function repetidos(y) {
 function vMas() {
   const imps = S.imports.slice().sort((a, b) => b.mes.localeCompare(a.mes));
   let h = `<h3>Extractos subidos</h3>`;
-  h += imps.length ? imps.map(i => `<button class="fila" data-imp="${i.id}"><div class="q"><div class="n">${esc(i.banco)} · ${nombreMes(i.mes)}</div><div class="s">${esc(i.persona)} · ${i.n} movimientos · ${esc(i.archivo || "")}</div></div><div class="v mut">›</div></button>`).join("")
+  h += imps.length ? imps.map(i => `<button class="fila" data-imp="${i.id}"><div class="q"><div class="n">${esc(i.banco)} · ${nombreImp(i.mes)}</div><div class="s">${esc(i.persona)} · ${i.n} movimientos · ${esc(i.archivo || "")}</div></div><div class="v mut">›</div></button>`).join("")
     : `<div class="lbl" style="margin:0 2px">Ninguno todavía.</div>`;
   h += `<h3>Mis reglas (${S.reglas.length})</h3>`;
   h += S.reglas.length ? S.reglas.map((r, i) => `<button class="fila" data-regla="${i}"><div class="q"><div class="n">“${esc(r.t)}”${r.imp != null ? " · " + eur(r.imp) : ""}</div><div class="s">→ ${esc(r.cat)}</div></div><div class="v mut">✕</div></button>`).join("")
@@ -202,7 +214,7 @@ function vMas() {
     <button class="btn sec" data-act="restaurar">Recuperar una copia</button>
     <div class="lbl" style="margin:10px 2px">Los datos se guardan solo en este iPhone, dentro de la app. Haz una copia de vez en cuando y guárdala en Archivos o en OneDrive.</div>
     <button class="btn peligro" data-act="borrarTodo">Borrar todos los datos</button>
-    <div class="lbl" style="margin:16px 2px;text-align:center">Mis Finanzas · v1.1 · ${S.movs.length} movimientos</div>`;
+    <div class="lbl" style="margin:16px 2px;text-align:center">Mis Finanzas · v1.2 · ${S.movs.length} movimientos</div>`;
   return h;
 }
 
@@ -305,6 +317,9 @@ function vistaPrevia(r, archivo) {
   const gas = nuevos.filter(m => m.importe < 0).reduce((a, m) => a - m.importe, 0);
   const ing = nuevos.filter(m => m.importe > 0).reduce((a, m) => a + m.importe, 0);
   const sinCat = nuevos.filter(m => porRevisar({ ...m, cat: null })).length;
+  // Extracto de varios meses: si hay 3 o mas meses distintos, cada movimiento va a su mes por fecha
+  const cuenta = {}; nuevos.forEach(m => { const k = m.fecha.slice(0, 7); cuenta[k] = (cuenta[k] || 0) + 1; });
+  const mesesF = Object.keys(cuenta).sort(), varios = mesesF.length >= 3;
   abrir(`<h2>Extracto ${esc(r.banco)}<button class="x">✕</button></h2>
     <div class="lbl">${esc(r.cuentas.map(c => c.nombre + " ··" + c.iban4).join(", "))}</div>
     <div class="cards" style="margin-top:10px">
@@ -314,24 +329,25 @@ function vistaPrevia(r, archivo) {
       <div class="card"><div class="lbl">Gastos</div><div class="big neg">${eur(gas)}</div></div></div>
     <div class="${r.cuadra ? "ok" : "ko"}" style="margin:4px 2px">${r.cuadra ? "✓ Cuadra con los saldos del banco: no falta ningún movimiento." : "⚠ Los saldos no cuadran: puede que falte algún movimiento. Revísalo."}</div>
     ${rep ? `<div class="aviso" style="margin-top:10px">${rep === r.movs.length ? "Este extracto ya estaba subido entero. No se duplicará nada." : rep + " movimientos ya estaban subidos y no se duplican."}</div>` : ""}
-    <div class="campo"><label>Mes al que lo subo</label><input type="month" id="pMes" value="${mes}"></div>
-    <div class="lbl" style="margin:-6px 2px 0">Todos los movimientos irán a este mes, aunque alguno tenga otra fecha.</div>
+    ${varios ? `<div class="ok" style="margin:10px 2px">Este extracto tiene ${mesesF.length} meses (${nombreMes(mesesF[0])} a ${nombreMes(mesesF[mesesF.length - 1])}). Cada movimiento irá a su mes.</div>`
+      : `<div class="campo"><label>Mes al que lo subo</label><input type="month" id="pMes" value="${mes}"></div>
+    <div class="lbl" style="margin:-6px 2px 0">Todos los movimientos irán a este mes, aunque alguno tenga otra fecha.</div>`}
     <div class="campo"><label>De quién es</label>${chipsPersona(S.persona || "Sebas", "p")}</div>
     <button class="btn" id="pOk" ${nuevos.length ? "" : "disabled style='opacity:.5'"}>Guardar ${nuevos.length} movimientos</button>
     <button class="btn sec x" style="font-size:16px">Cancelar</button>`);
   $("#pOk").onclick = () => {
     if (!nuevos.length) return;
-    const mesSel = $("#pMes").value || mes, per = personaSel($("#hoja"));
-    const imp = { id: uid(), banco: r.banco, mes: mesSel, persona: per, archivo, fecha: new Date().toISOString(), n: nuevos.length };
+    const mesSel = varios ? mesesF[mesesF.length - 1] : ($("#pMes").value || mes), per = personaSel($("#hoja"));
+    const imp = { id: uid(), banco: r.banco, mes: varios ? mesesF[0] + "/" + mesesF[mesesF.length - 1] : mesSel, persona: per, archivo, fecha: new Date().toISOString(), n: nuevos.length };
     const base = Date.now();
-    nuevos.forEach((m, i) => S.movs.push({ id: uid() + i, idb: idMov(r.banco, m), fecha: m.fecha, mes: mesSel, concepto: m.concepto, importe: m.importe, saldo: m.saldo,
+    nuevos.forEach((m, i) => S.movs.push({ id: uid() + i, idb: idMov(r.banco, m), fecha: m.fecha, mes: varios ? m.fecha.slice(0, 7) : mesSel, concepto: m.concepto, importe: m.importe, saldo: m.saldo,
       banco: r.banco, cuenta: m.cuenta, persona: per, cat: null, imp: imp.id, orden: base + i }));
-    S.imports.push(imp); S.persona = per; UI.mes = mesSel; UI.filtroP = "Todos";
+    S.imports.push(imp); S.persona = per; UI.mes = mesSel; UI.filtroP = "Juntos";
     guardar(); UI.vista = "resumen"; pintar();
     prepararExcel().catch(() => {});
     const rv = S.movs.filter(m => m.imp === imp.id && porRevisar(m)).length;
     abrir(`<h2>Guardado<button class="x">✕</button></h2>
-      <p class="ok" style="font-weight:600">✓ ${nuevos.length} movimientos en ${nombreMes(mesSel)}</p>
+      <p class="ok" style="font-weight:600">✓ ${nuevos.length} movimientos en ${varios ? nombreImp(imp.mes) : nombreMes(mesSel)}</p>
       ${rv ? `<p class="mut">${rv} quedan por revisar. Puedes hacerlo ahora o después; luego vuelve a descargar el Excel.</p>` : ""}
       <button class="btn" id="gExcel">Descargar mi Excel</button>
       ${rv ? `<button class="btn sec" id="gRev">Revisar ahora</button>` : ""}
@@ -345,7 +361,7 @@ function vistaPrevia(r, archivo) {
 function verImport(id) {
   const i = S.imports.find(x => x.id === id); if (!i) return;
   const n = S.movs.filter(m => m.imp === id).length;
-  abrir(`<h2>${esc(i.banco)} · ${nombreMes(i.mes)}<button class="x">✕</button></h2>
+  abrir(`<h2>${esc(i.banco)} · ${nombreImp(i.mes)}<button class="x">✕</button></h2>
     <div class="lbl">${esc(i.archivo || "")} · subido el ${new Date(i.fecha).toLocaleDateString("es-ES")} · ${esc(i.persona)}</div>
     <p>${n} movimientos.</p>
     <button class="btn peligro" id="iDel">Quitar este extracto y sus movimientos</button>`);
@@ -354,7 +370,7 @@ function verImport(id) {
 
 function descargar(nombre, blob) {
   const file = new File([blob], nombre, { type: blob.type });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) { navigator.share({ files: [file], title: nombre }).catch(() => {}); return; }
+  if (navigator.canShare && navigator.canShare({ files: [file] })) { navigator.share({ files: [file] }).catch(() => {}); return; }
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = nombre; document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
@@ -378,7 +394,7 @@ function prepararExcel() {
   });
   return excelListo.p;
 }
-const nombreExcel = () => "Mis Finanzas " + new Date().toISOString().slice(0, 10) + ".xlsx";
+const nombreExcel = () => "Mis Finanzas.xlsx";
 // boton: si ya esta listo lo guarda al momento; si no, espera y pide otro toque
 function botonExcel(btn) {
   if (!S.movs.length) return toast("Primero sube un extracto");

@@ -41,6 +41,9 @@
     if (!anio) {
       for (const r of rows) { const m = r.t.match(/Saldo Inicial a \d{2}\/(\d{2})\/(\d{4})/i); if (m) { mes = +m[1]; anio = +m[2]; break; } }
     }
+    // fecha de inicio del periodo ("Saldo Inicial a 31/12/2025") para saber el año del primer movimiento
+    let iniY = null;
+    for (const r of rows) { const m = r.t.match(/Saldo Inicial a (\d{2})\/(\d{2})\/(\d{4})/i); if (m) { iniY = +m[3]; break; } }
     const movs = []; const cuentas = [];
     let cuenta = null, saldoIni = null, dentro = false;
     for (const r of rows) {
@@ -57,9 +60,16 @@
       m = t.match(/^(\d{2})\/(\d{2})\s+(\d{2})\/(\d{2})\s+(.+?)\s+(-?[\d.]+,\d{2})\s?€\s+(-?[\d.]+,\d{2})\s?€$/);
       if (!m) continue;
       const d = +m[1], mm = +m[2];
-      let y = anio || new Date().getFullYear();
-      if (mes && mm > mes + 1) y -= 1;          // extracto de enero con dias de diciembre
-      else if (mes && mm < mes - 10) y += 1;    // extracto de diciembre con dias de enero
+      // Año: se sigue la secuencia de meses (sirve para extractos de un mes o de varios, incluso cruzando de año)
+      if (cuenta.y == null) {
+        if (iniY) cuenta.y = iniY;
+        else { cuenta.y = anio || new Date().getFullYear(); if (mes && mm > mes + 1) cuenta.y -= 1; else if (mes && mm < mes - 10) cuenta.y += 1; }
+      } else if (cuenta.mm != null) {
+        if (mm < cuenta.mm - 6) cuenta.y += 1;        // dic -> ene (orden ascendente)
+        else if (mm > cuenta.mm + 6) cuenta.y -= 1;   // ene -> dic (orden descendente)
+      }
+      cuenta.mm = mm;
+      const y = cuenta.y;
       movs.push({
         fecha: y + "-" + String(mm).padStart(2, "0") + "-" + String(d).padStart(2, "0"),
         concepto: m[5].trim(),

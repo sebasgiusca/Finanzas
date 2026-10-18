@@ -1,4 +1,4 @@
-const CACHE = "finanzas-v2";
+const CACHE = "finanzas-v3";
 const ASSETS = ["./", "./index.html", "./style.css", "./app.js", "./core.js", "./catalogo.js", "./manifest.json",
   "./icons/icon-192.png", "./icons/icon-512.png", "./vendor/pdf.min.js", "./vendor/pdf.worker.min.js", "./vendor/exceljs.min.js", "./excel.js"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS))); self.skipWaiting(); });
