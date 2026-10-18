@@ -9,13 +9,16 @@ const COMP = FinCore.compilar(CATALOGO.reglas);
 const COLORES = ["#38bdf8","#f472b6","#a78bfa","#fb923c","#4ade80","#facc15","#f87171","#2dd4bf","#c084fc","#60a5fa","#fbbf24","#34d399"];
 
 let S = cargar();
+const TRASP = "Transferencia entre mis cuentas";
+let PARES = new Map();
+recalcPares();
 function cargar() {
   try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.movs) return Object.assign({ imports: [], reglas: [] }, s); } catch (e) {}
   return { v: 1, movs: [], imports: [], reglas: [], persona: "Sebas" };
 }
 let VER = 0;
 function guardar() {
-  VER++;
+  VER++; recalcPares();
   try { localStorage.setItem(KEY, JSON.stringify(S)); }
   catch (e) { alert("No se ha podido guardar: el móvil no tiene espacio para la app. Haz una copia de seguridad en Más."); }
 }
@@ -37,6 +40,27 @@ function fechaLarga(f) { const d = new Date(f + "T12:00:00"); const t = d.toLoca
 function toast(t) { const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("on"), 2600); }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
+// ====== Traspasos entre mis cuentas ======
+// Una salida en una cuenta y una entrada del mismo importe en OTRA cuenta, con 4 dias o menos de diferencia,
+// y al menos una de las dos con pinta de transferencia => es dinero que se mueve entre mis cuentas (no cuenta).
+function recalcPares() {
+  PARES = new Map();
+  const tr = /transf|trf|traspas/i;
+  const ok = m => !m.cat && !m.noPar && Math.abs(m.importe) >= 1 && !/bizum|n[oó]mina/i.test(m.concepto);
+  const dias = (a, b) => Math.abs(new Date(a + "T12:00:00") - new Date(b + "T12:00:00")) / 864e5;
+  const ent = S.movs.filter(m => ok(m) && m.importe > 0);
+  for (const s of S.movs.filter(m => ok(m) && m.importe < 0).sort((a, b) => a.fecha.localeCompare(b.fecha))) {
+    let best = null, bd = 99;
+    for (const e of ent) {
+      if (PARES.has(e.id) || Math.abs(e.importe + s.importe) > 0.005) continue;
+      if (e.banco === s.banco && e.cuenta === s.cuenta) continue;
+      if (!tr.test(s.concepto) && !tr.test(e.concepto)) continue;
+      const d = dias(e.fecha, s.fecha); if (d <= 4 && d < bd) { best = e; bd = d; }
+    }
+    if (best) { PARES.set(s.id, best.id); PARES.set(best.id, s.id); }
+  }
+}
+
 // ====== Clasificacion ======
 // Prioridad: cambio a mano del movimiento > mis reglas (con importe primero, luego la mas larga) > catalogo
 function reglaUsuario(m) {
@@ -51,11 +75,12 @@ function reglaUsuario(m) {
 }
 function catDe(m) {
   if (m.cat) return m.cat;
+  if (PARES.has(m.id)) return TRASP;
   const ru = reglaUsuario(m); if (ru) return ru.cat;
   const b = FinCore.buscar(COMP, m.concepto); return b ? b.cat : SIN;
 }
 function porRevisar(m) {
-  if (m.cat || reglaUsuario(m)) return false;
+  if (m.cat || PARES.has(m.id) || reglaUsuario(m)) return false;
   const c = catDe(m);
   return c === SIN || /^transferencia/i.test(m.concepto);
 }
@@ -105,7 +130,7 @@ function pintar() {
 }
 
 function vResumen() {
-  if (!S.movs.length) return `<div class="vacio"><b>Aún no hay nada</b>Pulsa <b style="display:inline;color:var(--ac)">Subir extracto</b> y elige el PDF que descargas de la app de ING.</div>`;
+  if (!S.movs.length) return `<div class="vacio"><b>Aún no hay nada</b>Pulsa <b style="display:inline;color:var(--ac)">Subir extracto</b> y elige el PDF que descargas de la app de ING o el CSV de CaixaBankNow.</div>`;
   const lista = movsDe(UI.mes, UI.filtroP);
   if (!lista.length) return `<div class="vacio"><b>Sin movimientos en ${nombreMes(UI.mes)}</b>Cambia de mes con las flechas o sube el extracto de este mes.</div>`;
   const r = resumen(lista), ant = resumen(movsDe(sumaMes(UI.mes, -1), UI.filtroP));
@@ -214,7 +239,7 @@ function vMas() {
     <button class="btn sec" data-act="restaurar">Recuperar una copia</button>
     <div class="lbl" style="margin:10px 2px">Los datos se guardan solo en este iPhone, dentro de la app. Haz una copia de vez en cuando y guárdala en Archivos o en OneDrive.</div>
     <button class="btn peligro" data-act="borrarTodo">Borrar todos los datos</button>
-    <div class="lbl" style="margin:16px 2px;text-align:center">Mis Finanzas · v1.2 · ${S.movs.length} movimientos</div>`;
+    <div class="lbl" style="margin:16px 2px;text-align:center">Mis Finanzas · v1.3 · ${S.movs.length} movimientos</div>`;
   return h;
 }
 
@@ -255,6 +280,9 @@ function editar(id) {
       <input id="eClave" value="${esc(clave)}" style="margin-top:6px">
       <label class="check" style="padding:8px 0 0;margin:0;background:none"><input type="checkbox" id="eSoloImp" ${esTransf ? "checked" : ""}><div>Solo si el importe es ${eur(m.importe)}</div></label>
       <div class="lbl" style="margin-top:4px">${esTransf ? "Las transferencias se llaman todas igual: mejor que dependa del importe (por ejemplo la nómina)." : "Así los próximos meses ya saldrá bien."}</div></div></label>`}
+    ${nuevo ? "" : PARES.has(m.id) ? (() => { const o = S.movs.find(x => x.id === PARES.get(m.id)); return `<div class="ok" style="margin:10px 2px">✓ Traspaso entre tus cuentas: emparejado con ${esc(o.banco)} ${o.fecha.slice(8)}/${o.fecha.slice(5, 7)} (${eur(o.importe)}). No cuenta ni como gasto ni como ingreso.</div>
+      <button class="btn sec" id="eNoTr" style="font-size:16px">No es un traspaso</button>`; })()
+      : cat === TRASP ? "" : `<button class="btn sec" id="eTr" style="font-size:16px">Es un traspaso entre mis cuentas</button>`}
     <div class="campo"><label>Cuenta en el mes</label><input id="eMes" type="month" value="${m.mes}"></div>
     <div class="campo"><label>De quién es</label>${chipsPersona(m.persona, "e")}</div>
     <button class="btn" id="eOk">Guardar</button>
@@ -281,6 +309,8 @@ function editar(id) {
     } else { m.cat = nc; toast("Guardado"); }
     guardar(); cerrar(); pintar();
   };
+  if ($("#eTr")) $("#eTr").onclick = () => { m.cat = TRASP; guardar(); cerrar(); pintar(); toast("Marcado como traspaso: ya no cuenta"); };
+  if ($("#eNoTr")) $("#eNoTr").onclick = () => { m.noPar = true; guardar(); cerrar(); pintar(); toast("Hecho: ya no se empareja"); };
   if (!nuevo) $("#eDel").onclick = () => { if (!confirm("¿Borrar este movimiento?")) return; S.movs = S.movs.filter(x => x !== m); guardar(); cerrar(); pintar(); };
 }
 
@@ -291,6 +321,14 @@ $("#fileIn").addEventListener("change", async e => {
   const f = e.target.files[0]; e.target.value = ""; if (!f) return;
   abrir(`<div class="cargando">Leyendo ${esc(f.name)}...</div>`);
   try {
+    if (/\.csv$/i.test(f.name) || /csv/i.test(f.type)) {
+      const buf = await f.arrayBuffer();
+      let txt = new TextDecoder("utf-8").decode(buf);
+      if (txt.includes("\uFFFD")) txt = new TextDecoder("windows-1252").decode(buf);
+      const rc = FinCore.leerCSV(txt, f.name);
+      if (!rc) throw new Error("He abierto el CSV pero no encuentro las columnas Concepto, Fecha e Importe.");
+      return vistaPrevia(rc, f.name);
+    }
     const data = new Uint8Array(await f.arrayBuffer());
     const doc = await pdfjsLib.getDocument({ data, verbosity: 0 }).promise;
     const items = [];
@@ -319,9 +357,9 @@ function vistaPrevia(r, archivo) {
   const sinCat = nuevos.filter(m => porRevisar({ ...m, cat: null })).length;
   // Extracto de varios meses: si hay 3 o mas meses distintos, cada movimiento va a su mes por fecha
   const cuenta = {}; nuevos.forEach(m => { const k = m.fecha.slice(0, 7); cuenta[k] = (cuenta[k] || 0) + 1; });
-  const mesesF = Object.keys(cuenta).sort(), varios = mesesF.length >= 3;
+  const mesesF = Object.keys(cuenta).sort(), varios = mesesF.length >= 3 || (r.porFecha && mesesF.length > 0);
   abrir(`<h2>Extracto ${esc(r.banco)}<button class="x">✕</button></h2>
-    <div class="lbl">${esc(r.cuentas.map(c => c.nombre + " ··" + c.iban4).join(", "))}</div>
+    <div class="lbl">${esc(r.cuentas.map(c => c.nombre + (c.iban4 ? " ··" + c.iban4 : "")).join(", "))}</div>
     <div class="cards" style="margin-top:10px">
       <div class="card"><div class="lbl">Movimientos</div><div class="big">${r.movs.length}</div></div>
       <div class="card"><div class="lbl">Clasificados solos</div><div class="big">${nuevos.length - sinCat}/${nuevos.length}</div></div>
@@ -329,7 +367,7 @@ function vistaPrevia(r, archivo) {
       <div class="card"><div class="lbl">Gastos</div><div class="big neg">${eur(gas)}</div></div></div>
     <div class="${r.cuadra ? "ok" : "ko"}" style="margin:4px 2px">${r.cuadra ? "✓ Cuadra con los saldos del banco: no falta ningún movimiento." : "⚠ Los saldos no cuadran: puede que falte algún movimiento. Revísalo."}</div>
     ${rep ? `<div class="aviso" style="margin-top:10px">${rep === r.movs.length ? "Este extracto ya estaba subido entero. No se duplicará nada." : rep + " movimientos ya estaban subidos y no se duplican."}</div>` : ""}
-    ${varios ? `<div class="ok" style="margin:10px 2px">Este extracto tiene ${mesesF.length} meses (${nombreMes(mesesF[0])} a ${nombreMes(mesesF[mesesF.length - 1])}). Cada movimiento irá a su mes.</div>`
+    ${varios ? `<div class="ok" style="margin:10px 2px">${mesesF.length > 1 ? `Este extracto tiene ${mesesF.length} meses (${nombreMes(mesesF[0])} a ${nombreMes(mesesF[mesesF.length - 1])}). Cada movimiento irá a su mes.` : `Es de ${nombreMes(mesesF[0])}.`}</div>`
       : `<div class="campo"><label>Mes al que lo subo</label><input type="month" id="pMes" value="${mes}"></div>
     <div class="lbl" style="margin:-6px 2px 0">Todos los movimientos irán a este mes, aunque alguno tenga otra fecha.</div>`}
     <div class="campo"><label>De quién es</label>${chipsPersona(S.persona || "Sebas", "p")}</div>
@@ -338,7 +376,7 @@ function vistaPrevia(r, archivo) {
   $("#pOk").onclick = () => {
     if (!nuevos.length) return;
     const mesSel = varios ? mesesF[mesesF.length - 1] : ($("#pMes").value || mes), per = personaSel($("#hoja"));
-    const imp = { id: uid(), banco: r.banco, mes: varios ? mesesF[0] + "/" + mesesF[mesesF.length - 1] : mesSel, persona: per, archivo, fecha: new Date().toISOString(), n: nuevos.length };
+    const imp = { id: uid(), banco: r.banco, mes: varios ? (mesesF.length > 1 ? mesesF[0] + "/" + mesesF[mesesF.length - 1] : mesesF[0]) : mesSel, persona: per, archivo, fecha: new Date().toISOString(), n: nuevos.length };
     const base = Date.now();
     nuevos.forEach((m, i) => S.movs.push({ id: uid() + i, idb: idMov(r.banco, m), fecha: m.fecha, mes: varios ? m.fecha.slice(0, 7) : mesSel, concepto: m.concepto, importe: m.importe, saldo: m.saldo,
       banco: r.banco, cuenta: m.cuenta, persona: per, cat: null, imp: imp.id, orden: base + i }));

@@ -91,10 +91,47 @@
     return { banco: "ING", mes: anio && mes ? anio + "-" + String(mes).padStart(2, "0") : null, cuentas, movs, cuadra };
   }
 
+  // ---------- CSV (CaixaBankNow: Concepto;Fecha;Importe;Saldo) ----------
+  function partirCSV(l, sep) {
+    const out = []; let cur = "", q = false;
+    for (let i = 0; i < l.length; i++) {
+      const ch = l[i];
+      if (ch === '"') { if (q && l[i + 1] === '"') { cur += '"'; i++; } else q = !q; }
+      else if (ch === sep && !q) { out.push(cur); cur = ""; }
+      else cur += ch;
+    }
+    out.push(cur); return out.map(x => x.trim());
+  }
+  function leerCSV(texto, archivo) {
+    const lin = texto.replace(/^\uFEFF/, "").split(/\r?\n/).filter(l => l.trim());
+    if (lin.length < 2) return null;
+    const sep = (lin[0].match(/;/g) || []).length >= (lin[0].match(/,/g) || []).length ? ";" : ",";
+    const cab = partirCSV(lin[0], sep).map(h => h.toLowerCase());
+    const col = re => cab.findIndex(h => re.test(h));
+    const iC = col(/concepto|descripci/), iF = col(/^fecha/), iI = col(/importe/), iS = col(/saldo/);
+    if (iC < 0 || iF < 0 || iI < 0) return null;
+    const banco = /caixa/i.test(archivo || "") ? "CaixaBank" : "Banco";
+    const importe = v => num(String(v || "").replace(/eur|€|\s/gi, "").replace(/^\+/, ""));
+    let movs = [];
+    for (const l of lin.slice(1)) {
+      const c = partirCSV(l, sep);
+      const f = (c[iF] || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); const imp = importe(c[iI]);
+      if (!f || imp == null) continue;
+      const y = f[3].length === 2 ? 2000 + +f[3] : +f[3];
+      movs.push({ fecha: y + "-" + f[2].padStart(2, "0") + "-" + f[1].padStart(2, "0"), concepto: (c[iC] || "").replace(/\s+/g, " "),
+        importe: imp, saldo: iS >= 0 ? importe(c[iS]) : null, cuenta: banco });
+    }
+    if (!movs.length) return null;
+    if (movs[0].fecha > movs[movs.length - 1].fecha) movs.reverse();   // CaixaBank lo da del mas nuevo al mas viejo
+    let cuadra = iS >= 0;
+    for (let i = 1; i < movs.length && cuadra; i++) if (movs[i].saldo == null || movs[i - 1].saldo == null || Math.abs(movs[i - 1].saldo + movs[i].importe - movs[i].saldo) > 0.005) cuadra = false;
+    return { banco, mes: null, porFecha: true, cuentas: [{ nombre: banco, iban4: "" }], movs, cuadra };
+  }
+
   function leerExtracto(items) {
     const rows = filas(items);
     if (esING(rows)) return leerING(rows);
-    const err = new Error("No reconozco este extracto. De momento sé leer los PDF de ING (Extracto Integrado).");
+    const err = new Error("No reconozco este extracto. De momento sé leer los PDF de ING (Extracto Integrado) y el CSV de CaixaBankNow.");
     err.code = "BANCO";
     throw err;
   }
@@ -133,5 +170,5 @@
     return limpiar(concepto).toLowerCase().replace(/[0-9*]+/g, "").replace(/\s+/g, " ").trim().split(" ").slice(0, 3).join(" ");
   }
 
-  G.FinCore = { leerExtracto, filas, leerING, compilar, buscar, limpiar, claveComercio, num, MESES };
+  G.FinCore = { leerExtracto, leerCSV, filas, leerING, compilar, buscar, limpiar, claveComercio, num, MESES };
 })(typeof window !== "undefined" ? window : globalThis);
